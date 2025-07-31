@@ -58,8 +58,16 @@ class TipAnalytics {
             const response = await fetch(`/api/v1/projects/${this.projectId}/comments?${params}`);
             const data = await response.json();
             
-            // Fix: Access the correct data structure
-            const comments = data.comments?.data || [];
+            // Fix: Access the correct data structure - handle both nested and flat structures
+            let comments;
+            if (data.comments && Array.isArray(data.comments.data)) {
+                comments = data.comments.data.map(item => item.comment || item);
+            } else if (Array.isArray(data.comments)) {
+                comments = data.comments.map(item => item.comment || item);
+            } else {
+                comments = [];
+            }
+            
             this.tips = reset ? comments : [...this.tips, ...comments];
             this.hasMore = data.comments?.has_next_page || false;
             
@@ -129,10 +137,32 @@ class TipAnalytics {
     renderTipItem(tip, showImages) {
         const amount = tip.card_data?.credits_spent || 0;
         const time = new Date(tip.created_at).toLocaleString();
-        const content = DOMPurify.sanitize(marked.parse(tip.raw_content || 'No message'));
         
-        const images = tip.content?.content?.filter(c => c.type === 'image') || [];
-        const imageUrls = images.map(img => img.attrs.src);
+        // Fix: Handle both markdown and plain text content
+        let content = '';
+        if (tip.raw_content) {
+            content = DOMPurify.sanitize(marked.parse(tip.raw_content));
+        } else if (tip.content) {
+            content = tip.raw_content || 'No message';
+        } else {
+            content = 'No message';
+        }
+
+        // Fix: Handle image extraction more robustly
+        let imageUrls = [];
+        if (tip.raw_content) {
+            // Extract image URLs from markdown
+            const imgMatches = tip.raw_content.match(/!\[.*?\]\((.*?)\)/g);
+            if (imgMatches) {
+                imageUrls = imgMatches.map(match => match.match(/\((.*?)\)/)[1]);
+            }
+        }
+        
+        // Also check the structured content
+        if (tip.content?.content) {
+            const images = tip.content.content.filter(c => c.type === 'image');
+            imageUrls = [...imageUrls, ...images.map(img => img.attrs.src)];
+        }
 
         return `
             <div class="tip-item">
@@ -148,7 +178,7 @@ class TipAnalytics {
                     <div class="tip-message">${content}</div>
                     ${showImages && imageUrls.length > 0 ? `
                         <div class="tip-images">
-                            ${imageUrls.map(url => `<img src="${url}" alt="Tip image">`).join('')}
+                            ${imageUrls.slice(0, 4).map(url => `<img src="${url}" alt="Tip image" loading="lazy">`).join('')}
                         </div>
                     ` : ''}
                 </div>
@@ -157,7 +187,7 @@ class TipAnalytics {
     }
 
     renderTopTippers() {
-        const tips = this.tips.map(t => t.comment || t);
+        const tips = this.tips;
         const tippers = {};
 
         tips.forEach(tip => {
@@ -179,7 +209,7 @@ class TipAnalytics {
             .slice(0, 5);
 
         const container = document.getElementById('top-tippers');
-        container.innerHTML = sortedTippers.map(tipper => `
+        container.innerHTML = sortedTippers.length > 0 ? sortedTippers.map(tipper => `
             <div class="top-tipper">
                 <div class="top-tipper-avatar">
                     ${tipper.username.charAt(0).toUpperCase()}
@@ -187,11 +217,11 @@ class TipAnalytics {
                 <div class="top-tipper-info">
                     <div class="top-tipper-name">@${tipper.username}</div>
                     <div class="top-tipper-stats">
-                        ${tipper.tips} tips • ${tipper.credits.toLocaleString()} credits
+                        ${tipper.tips} tip${tipper.tips !== 1 ? 's' : ''} • ${tipper.credits.toLocaleString()} credits
                     </div>
                 </div>
             </div>
-        `).join('');
+        `).join('') : '<div class="loading">No tips received yet</div>';
     }
 
     prependTip(comment) {
