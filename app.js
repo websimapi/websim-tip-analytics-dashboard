@@ -58,9 +58,10 @@ class TipAnalytics {
             const response = await fetch(`/api/v1/projects/${this.projectId}/comments?${params}`);
             const data = await response.json();
             
-            this.tips = reset ? data.comments.data : [...this.tips, ...data.comments.data];
-            this.cursor = data.comments.has_next_page ? this.getLastCursor(data.comments.data) : null;
-            this.hasMore = data.comments.has_next_page;
+            // Fix: Access the correct data structure
+            const comments = data.comments?.data || [];
+            this.tips = reset ? comments : [...this.tips, ...comments];
+            this.hasMore = data.comments?.has_next_page || false;
             
             this.updateStats();
             this.renderTips();
@@ -68,6 +69,8 @@ class TipAnalytics {
             
         } catch (error) {
             console.error('Error loading tips:', error);
+            const container = document.getElementById('tips-list');
+            container.innerHTML = '<div class="loading">Error loading tips. Try refreshing.</div>';
         } finally {
             this.isLoading = false;
         }
@@ -80,7 +83,7 @@ class TipAnalytics {
     }
 
     updateStats() {
-        const tips = this.tips.map(t => t.comment);
+        const tips = this.tips.map(t => t.comment || t);
         
         // Total tips
         const totalTips = tips.length;
@@ -88,12 +91,16 @@ class TipAnalytics {
 
         // Total credits
         const totalCredits = tips.reduce((sum, tip) => {
-            return sum + (tip.card_data?.credits_spent || 0);
+            const comment = tip.comment || tip;
+            return sum + (comment.card_data?.credits_spent || 0);
         }, 0);
         document.getElementById('total-credits').textContent = totalCredits.toLocaleString();
 
         // Unique tippers
-        const uniqueTippers = new Set(tips.map(tip => tip.author.id)).size;
+        const uniqueTippers = new Set(tips.map(tip => {
+            const comment = tip.comment || tip;
+            return comment.author.id;
+        })).size;
         document.getElementById('unique-tippers').textContent = uniqueTippers;
 
         // Average tip size
@@ -110,7 +117,10 @@ class TipAnalytics {
             return;
         }
 
-        container.innerHTML = this.tips.map(item => this.renderTipItem(item.comment, showImages)).join('');
+        container.innerHTML = this.tips.map(item => {
+            const comment = item.comment || item;
+            return this.renderTipItem(comment, showImages);
+        }).join('');
         
         const loadMoreBtn = document.getElementById('load-more');
         loadMoreBtn.style.display = this.hasMore ? 'block' : 'none';
@@ -147,7 +157,7 @@ class TipAnalytics {
     }
 
     renderTopTippers() {
-        const tips = this.tips.map(t => t.comment);
+        const tips = this.tips.map(t => t.comment || t);
         const tippers = {};
 
         tips.forEach(tip => {
@@ -193,11 +203,12 @@ class TipAnalytics {
 
     getLastCursor(items) {
         if (items.length === 0) return null;
-        return items[items.length - 1].comment.id;
+        // Fix: Return the actual cursor value from the last item
+        return items[items.length - 1]?.comment?.id || items[items.length - 1]?.id;
     }
 
     exportCSV() {
-        const tips = this.tips.map(t => t.comment);
+        const tips = this.tips.map(t => t.comment || t);
         const csv = [
             'Username,Display Name,Tips,Credits,Last Tip,Message',
             ...tips.map(tip => [
@@ -222,4 +233,3 @@ class TipAnalytics {
 
 // Initialize the app
 new TipAnalytics();
-
